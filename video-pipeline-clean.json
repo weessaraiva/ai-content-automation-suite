@@ -1,0 +1,372 @@
+{
+  "name": "Automação Tiktok - Full Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "4450b6b4-9cb4-43cf-afd4-6a7cc95d9932",
+      "name": "Teste Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/AmItheAsshole/new.rss",
+        "options": {}
+      },
+      "id": "1e0d1a1e-702a-42a8-aaff-786d90fac46f",
+      "name": "RSS Feed Reddit",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        64,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet content = (item.content || item.description || '').substring(0, 3000);\ncontent = content.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/gi, ' ').trim();\n\nif (content.length < 200) {\n  throw new Error('Post muito curto');\n}\n\nreturn {\n  json: {\n    title: item.title || 'Sem título',\n    cleanContent: content\n  }\n};"
+      },
+      "id": "7fc94af7-7f54-481d-9516-e51a502499b0",
+      "name": "Limpar RSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{SUA_API_KEY_GEMINI}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"contents\": [{ \"parts\": [{ \"text\": \"Você é um roteirista sênior e tradutor. Traduza este post do Reddit para português BR e crie um roteiro de narração de 3-4 minutos.\\n\\n🚨 CRÍTICO: Responda APENAS com texto puro para narração. SEM asteriscos, hashtags, colchetes, markdown ou formatação. Apenas vírgulas, pontos e pontos de exclamação.\\n\\nPOST:\\nTítulo: {{ $json.title }}\\nConteúdo: {{ $json.cleanContent }}\\n\\nROTEIRO (comece narrando):\" }] }], \"generationConfig\": { \"temperature\": 0.8, \"maxOutputTokens\": 4096 } }",
+        "options": {}
+      },
+      "id": "aac144f0-d789-483f-853a-6dfc02562e7a",
+      "name": "Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        512,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nlet roteiro = '';\n\n// Verifica estrutura completa do Gemini\nif (response.candidates?.[0]?.content?.parts?.[0]?.text) {\n  roteiro = response.candidates[0].content.parts[0].text;\n} \n// Fallback para conteúdo direto ou outros formatos\nelse if (response.text) {\n  roteiro = response.text;\n}\nelse if (response.content?.parts?.[0]?.text) {\n  roteiro = response.content.parts[0].text;\n}\nelse {\n  // DEBUG: mostra o que chegou\n  const debugInfo = {\n    has_candidates: !!response.candidates,\n    finishReason: response.candidates?.[0]?.finishReason,\n    content_keys: Object.keys(response.candidates?.[0]?.content || {}),\n    has_parts: !!response.candidates?.[0]?.content?.parts\n  };\n  throw new Error(`Gemini sem texto. Debug: ${JSON.stringify(debugInfo)}`);\n}\n\n// Limpa formatação Markdown\nroteiro = roteiro\n  .trim()\n  .replace(/\\*\\*?|\\*+/g, '')      // Bold/italic\n  .replace(/#{1,6}\\s*/g, '')       // Headers\n  .replace(/\\[[^\\]]*\\]/g, '')      // [links]\n  .replace(/`{1,3}/g, '')          // Code\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Validação final\nif (roteiro.length < 150) {\n  throw new Error(`Roteiro curto (${roteiro.length} chars): \"${roteiro.substring(0, 100)}...\"`);\n}\n\nreturn [{\n  json: {\n    roteiro: roteiro,\n    length: roteiro.length\n  }\n}];\n"
+      },
+      "id": "7c44e81a-5685-48af-bedd-bb49da748e8a",
+      "name": "Limpar Roteiro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://brazilsouth.tts.speech.microsoft.com/cognitiveservices/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "{{SUA_SUBSCRIPTION_KEY_AZURE}}"
+            },
+            {
+              "name": "X-Microsoft-OutputFormat",
+              "value": "audio-16khz-128kbitrate-mono-mp3"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/ssml+xml",
+        "body": "=<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"pt-BR\"><voice name=\"pt-BR-FranciscaNeural\">{{ $json.roteiro }}</voice></speak>",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "7477d565-284c-44e6-aae3-80952b7791ff",
+      "name": "Azure TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "=/tmp/audio_{{ $now.toUnixInteger() }}.mp3",
+        "options": {}
+      },
+      "id": "c64ec590-592f-4b9a-8038-1b446bd0af12",
+      "name": "Salvar Áudio",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=/bin/sh /tmp/criar_video.sh {{ $json.audio_path }} {{ $json.video_id }}"
+      },
+      "id": "311eb503-7e31-4a77-87a0-067769daea66",
+      "name": "FFmpeg - Criar Vídeo",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        96,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=/bin/sh -c \"\necho 'JSON atual: {{ JSON.stringify($json) }}'\n\naudio={{ $json.audio_path }}\nid={{ $json.video_id }}\n\necho \\\"Audio path dentro do comando: $audio\\\"\necho \\\"Video ID: $id\\\"\n\nls -l \\\"$audio\\\" || echo 'ls falhou (arquivo não existe)'\n\ncurl -F \\\"audio_file=@$audio\\\" \\\n     -F 'task=transcribe' \\\n     -F 'language=pt' \\\n     -F 'output=srt' \\\n     http://automacao-whisper-1:9000/asr \\\n  > /tmp/legendas_${id}.srt\n\ncat /tmp/legendas_${id}.srt\n\"\n"
+      },
+      "id": "caa55655-38f7-47b9-99f9-1ee69087d64f",
+      "name": "Whisper - Legendas",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        96,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=/tmp/adicionar_legendas_perfeita.sh \\\n  \"/tmp/video_sem_legenda_{{ $json.video_id }}.mp4\" \\\n  \"/tmp/legendas_{{ $json.video_id }}.srt\" \\\n  \"/tmp/video_final_{{ $json.video_id }}.mp4\""
+      },
+      "id": "5eec3ce1-ff95-42d9-b4e8-8138dc452a9f",
+      "name": "FFmpeg - Legendas",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        80,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "filePath": "=/tmp/video_final_{{ $('Code').item.json.video_id }}.mp4"
+      },
+      "id": "86693a9f-079d-4e30-b36a-18619b0148c5",
+      "name": "Ler Vídeo",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        496,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "name": "=video_aita_{{ $now.format('yyyy-MM-dd_HH-mm') }}.mp4",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root"
+        },
+        "options": {}
+      },
+      "id": "abd25edb-549a-4f59-9648-982ec47d61ff",
+      "name": "Upload Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        832,
+        112
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "RZcD7ehO2DGr0sZl",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o input do nó anterior (Salvar Áudio)\nconst input = $input.first().json;\n\n// Debug: vê o que tem disponível\nconsole.log('Input disponível:', JSON.stringify(input));\n\n// Tenta diferentes campos\nlet audioPath = input.fileName || input.filename || input.file || input.path;\n\nif (!audioPath) {\n  throw new Error('Caminho do áudio não encontrado! Input: ' + JSON.stringify(input));\n}\n\n// Extrai o ID do nome do arquivo\nconst match = audioPath.match(/audio_(\\d+)\\.mp3/);\nif (!match) {\n  throw new Error('Nome do arquivo inválido: ' + audioPath);\n}\n\nconst videoId = match[1];\n\nreturn {\n  json: {\n    audio_path: audioPath,\n    video_id: videoId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        112
+      ],
+      "id": "2694c025-eacd-48ca-b837-bf8d8bb8cc09",
+      "name": "Code"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Teste Manual": {
+      "main": [
+        [
+          {
+            "node": "RSS Feed Reddit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Feed Reddit": {
+      "main": [
+        [
+          {
+            "node": "Limpar RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar RSS": {
+      "main": [
+        [
+          {
+            "node": "Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "main": [
+        [
+          {
+            "node": "Limpar Roteiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar Roteiro": {
+      "main": [
+        [
+          {
+            "node": "Azure TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure TTS": {
+      "main": [
+        [
+          {
+            "node": "Salvar Áudio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar Áudio": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FFmpeg - Criar Vídeo": {
+      "main": [
+        []
+      ]
+    },
+    "Whisper - Legendas": {
+      "main": [
+        []
+      ]
+    },
+    "FFmpeg - Legendas": {
+      "main": [
+        [
+          {
+            "node": "Ler Vídeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ler Vídeo": {
+      "main": [
+        [
+          {
+            "node": "Upload Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Drive": {
+      "main": [
+        []
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Whisper - Legendas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FFmpeg - Criar Vídeo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FFmpeg - Legendas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

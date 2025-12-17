@@ -1,0 +1,228 @@
+{
+  "name": "Tiktok Audio & Legenda Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/cheating_stories/new.rss",
+        "options": {}
+      },
+      "id": "7721fd5f-9afa-4ed8-bbba-b90d059a924f",
+      "name": "RSS Feed Reddit",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 🎲 Pega TODOS os posts do RSS e escolhe um ALEATÓRIO\n\nconst items = $input.all();\n\nif (!items || items.length === 0) {\n  throw new Error('❌ Nenhum post encontrado no RSS');\n}\n\nconsole.log(`📥 Total de posts no feed: ${items.length}`);\n\n// Escolhe um post ALEATÓRIO de TODOS os disponíveis\nconst randomIndex = Math.floor(Math.random() * items.length);\nconst selectedItem = items[randomIndex].json;\n\nconsole.log(`🎲 Post aleatório escolhido: #${randomIndex + 1} de ${items.length}`);\nconsole.log(`📌 Título: ${selectedItem.title}`);\n\n// Limpa o conteúdo HTML\nlet content = (selectedItem.content || selectedItem.description || '').substring(0, 3000);\ncontent = content.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/gi, ' ').trim();\n\nif (content.length < 200) {\n  throw new Error('⚠️ Post muito curto (menos de 200 caracteres)');\n}\n\nreturn {\n  json: {\n    title: selectedItem.title || 'Sem título',\n    cleanContent: content,\n    postUrl: selectedItem.link || selectedItem.guid,\n    totalPosts: items.length,\n    selectedIndex: randomIndex\n  }\n};"
+      },
+      "id": "50b8ce9d-0772-4b6e-ad86-417aa0066451",
+      "name": "Limpar RSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{SUA_API_KEY_GEMINI}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Você é um autor de Best-Sellers especializado em transformar relatos curtos do Reddit em narrativas longas, imersivas e emocionantes para podcasts e TikToks virais.\\n\\n🚨 PROBLEMA CRÍTICO: Os roteiros anteriores ficaram curtos demais. Sua prioridade máxima agora é EXPANDIR a história para ter duração de 3 a 4 minutos de leitura.\\n\\nSua missão: Pegar o relato abaixo e reescrevê-lo, expandindo cada detalhe.\\n\\n🔥 TÉCNICAS OBRIGATÓRIAS DE EXPANSÃO:\\n1. NÃO RESUMA. Se o autor diz \\\"brigamos\\\", você deve escrever o diálogo da briga, os gritos, o que foi sentido.\\n2. MONÓLOGO INTERNO: Descreva o que a pessoa pensou antes de agir. A dúvida, o medo, a raiva crescendo.\\n3. DETALHES SENSORIAIS: Descreva o ambiente. \\\"O silêncio na sala era ensurdecedor\\\", \\\"Minhas mãos tremiam segurando o celular\\\".\\n4. DIÁLOGOS: Transforme narrativa indireta em direta. Crie as falas das outras pessoas na história.\\n\\nESTRUTURA DO ROTEIRO (MÍNIMO 800 PALAVRAS):\\n- [0-10s] GANCHO: Uma frase curta e chocante. (Ex: \\\"Eu descobri que minha vida inteira foi uma mentira por causa de um teste de DNA\\\").\\n- [Contexto Detalhado]: Quem são as pessoas, como era a vida antes do problema. Faça a audiência se importar.\\n- [O Conflito Lento]: Aumente a tensão aos poucos. Não entregue o ouro rápido.\\n- [A Explosão/Clímax]: O momento do confronto. Descreva em câmera lenta.\\n- [Consequências]: O que aconteceu depois? Como a família reagiu? Como você se sente hoje?\\n- [Encerramento]: Uma pergunta final para o público.\\n\\nREGRAS DE LINGUAGEM:\\n- Use Português BR coloquial e natural.\\n- Texto corrido (sem quebras de linha, sem negrito, sem títulos).\\n- Use vírgulas para manter o fluxo rápido.\\n\\nENTRADA:\\nTítulo: {{ $json.title }}\\nHistória Original: {{ $json.cleanContent }}\\n\\nROTEIRO EXTENDIDO (Mínimo 800 palavras):\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.85,\n    \"maxOutputTokens\": 8192\n  }\n}",
+        "options": {}
+      },
+      "id": "9cde45b6-12eb-4536-84c7-83d6ee1a1c0a",
+      "name": "Gemini Roteiro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nlet roteiro = '';\n\n// Verifica estrutura completa do Gemini\nif (response.candidates?.[0]?.content?.parts?.[0]?.text) {\n  roteiro = response.candidates[0].content.parts[0].text;\n} \nelse if (response.text) {\n  roteiro = response.text;\n}\nelse if (response.content?.parts?.[0]?.text) {\n  roteiro = response.content.parts[0].text;\n}\nelse {\n  throw new Error('Gemini não retornou texto válido');\n}\n\n// 1. Limpa formatação Markdown e Caracteres Especiais\nroteiro = roteiro\n  .replace(/\\*\\*?|\\*+/g, '')        // Remove Bold/italic\n  .replace(/#{1,6}\\s*/g, '')        // Remove Headers (#)\n  .replace(/\\[[^\\]]*\\]/g, '')       // Remove links [texto]\n  .replace(/`{1,3}/g, '')           // Remove código\n  .replace(/\"/g, '')                // Remove aspas duplas (ajuda no XML do Azure)\n  .trim();\n\n// -----------------------------------------------------------\n// 🔥 O PULO DO GATO (MODO SLUDGE/TIKTOK)\n// -----------------------------------------------------------\n\n// A. Remove TODAS as quebras de linha (transforma em espaço)\n// O Azure entende \\n como \"fim de parágrafo\" e dá uma pausa longa.\nroteiro = roteiro.replace(/(\\r\\n|\\n|\\r)/gm, \" \");\n\n// B. Remove Reticências (...)\n// O Azure faz uma pausa dramática enorme aqui. Trocamos por vírgula.\nroteiro = roteiro.replace(/\\.\\.\\./g, \", \");\n\n// C. Substitui Ponto Final seguido de espaço por Vírgula\n// Isso mantém a entonação caindo levemente, mas REMOVE a pausa de respiração.\nroteiro = roteiro.replace(/\\. /g, \", \");\n\n// D. Normaliza espaços (remove duplos criados acima)\nroteiro = roteiro.replace(/\\s+/g, ' ');\n\n// -----------------------------------------------------------\n\n// 🔞 Remove palavrões comuns (filtro básico)\nconst palavroes = [\n  'porra', 'caralho', 'puta', 'merda', 'foda', 'fodeu', 'foder',\n  'cacete', 'cu', 'buceta', 'pau', 'pinto', 'viado', 'desgraça'\n];\n\npalavroes.forEach(palavra => {\n  // Regex ajustado para não pegar palavras dentro de outras (ex: 'computador')\n  const regex = new RegExp(`\\\\b${palavra}\\\\b`, 'gi');\n  roteiro = roteiro.replace(regex, 'droga'); // 'droga' soa melhor que [censurado] no áudio\n});\n\n// Verifica se o roteiro foi cortado no meio\nconst temCTA = /comenta|segue|me segue|deixa|inscreve|quer ouvir|quer mais|parte 2/i.test(roteiro);\nconst temFinal = /final|fim|conclusão|moral|acabou|terminou/i.test(roteiro);\n\nif (!temCTA && !temFinal) {\n  console.log('⚠️ AVISO: Roteiro pode estar incompleto (sem CTA ou conclusão)');\n}\n\n// Validação final de tamanho\nif (roteiro.length < 300) {\n  // Reduzi para 300 pois as vezes histórias curtas são boas\n  throw new Error(`Roteiro muito curto (${roteiro.length} chars). Pode ter sido cortado.`);\n}\n\nreturn [{\n  json: {\n    roteiro: roteiro, // Texto limpo para o Azure\n    length: roteiro.length,\n    temCTA: temCTA\n  }\n}];"
+      },
+      "id": "3b18b031-1696-46c1-8dd3-bd0df0b74fd8",
+      "name": "Extrair Roteiro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{SUA_API_KEY_GEMINI}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Você é um estrategista de crescimento do TikTok especializado em canais de 'Reddit Stories' e Fofoca. Sua tarefa é escrever a legenda (descrição) perfeita para o vídeo dessa história.\\n\\n🔥 REGRAS DE OURO DA LEGENDA:\\n1. NÃO RESUMA A HISTÓRIA. Venda a polêmica.\\n2. USE 1ª PESSOA (como se fosse a dona da história escrevendo).\\n3. SEJA CURTO. O TikTok esconde o texto depois de 2 linhas.\\n4. PROIBIDO começar com: \\\"Nesta história\\\", \\\"Confira\\\", \\\"Veja o que aconteceu\\\". Isso mata o alcance.\\n\\nESTRUTURA OBRIGATÓRIA:\\n\\n[LINHA 1 - O GANCHO VISÍVEL]: Uma frase curta e chocante em CAIXA ALTA (parcialmente) com um emoji de impacto. Deve caber na primeira linha do celular.\\nEx: \\\"Minha mãe ARRUINOU meu casamento 🤬\\\"\\nEx: \\\"Descobri que não sou pai do meu filho 💀\\\"\\n\\n[LINHA 2 - O CONTEXTO]: Uma frase de suspense que faça a pessoa assistir até o final.\\nEx: \\\"A desculpa que ela deu foi inacreditável...\\\"\\nEx: \\\"O final dessa história vai te deixar com raiva.\\\"\\n\\n[LINHA 3 - CTA DE ENGAJAMENTO]: Uma pergunta sobre a moral da história para forçar comentários.\\nEx: \\\"Eu fui a babaca?\\\" ou \\\"Você perdoaria?\\\"\\n\\n[HASHTAGS]: Exatamente 5 hashtags focadas no nicho BR.\\nUse sempre: #relatos #historiareal #fofoca #redditbrasil #casosdefamilia\\n\\nENTRADA:\\nTítulo: {{ $json.title }}\\nHistória: {{ $json.cleanContent }}\\n\\nSAÍDA (Apenas a legenda pronta, sem aspas):\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.85,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "options": {}
+      },
+      "id": "c9085880-2385-46f8-97fd-6c0203338df8",
+      "name": "Gemini Legenda",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nlet legenda = '';\n\n// Extrai texto do Gemini\nif (response.candidates?.[0]?.content?.parts?.[0]?.text) {\n  legenda = response.candidates[0].content.parts[0].text;\n} else if (response.text) {\n  legenda = response.text;\n} else if (response.content?.parts?.[0]?.text) {\n  legenda = response.content.parts[0].text;\n} else {\n  throw new Error('Gemini não retornou legenda válida');\n}\n\n// Limpa qualquer formatação markdown que tenha sobrado\nlegenda = legenda\n  .trim()\n  .replace(/\\*\\*?|\\*+/g, '')        // Remove bold/italic\n  .replace(/#{1,6}\\s*/g, '')        // Remove headers\n  .replace(/`{1,3}/g, '')           // Remove code blocks\n  .replace(/\\[[^\\]]*\\]\\([^)]*\\)/g, '') // Remove links markdown\n  .replace(/\\\\n/g, '\\n')           // Converte \\n em quebra real\n  .trim();\n\n// Validação\nif (legenda.length < 20) {\n  throw new Error('Legenda muito curta');\n}\n\nif (legenda.length > 2200) {\n  legenda = legenda.substring(0, 2200) + '...';\n  console.log('⚠️ Legenda cortada para respeitar limite do TikTok');\n}\n\nreturn [{\n  json: {\n    legenda: legenda,\n    length: legenda.length\n  }\n}];"
+      },
+      "id": "44b8bd5c-b29b-41e2-ba61-a1196e05fd9b",
+      "name": "Extrair Legenda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{SEU_TELEGRAM_CHAT_ID}}",
+        "text": "=🎬 *NOVA HISTÓRIA PRONTA!*\n\n📝 *LEGENDA PARA TIKTOK:*\n━━━━━━━━━━━━━━━━━\n{{ $json.legenda }}\n━━━━━━━━━━━━━━━━━\n\n✅ Áudio gerado e salvo no Google Drive!\n🎯 Pronto para postar!",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "5eed83b9-4ae8-46fc-a134-1728c3844171",
+      "name": "Enviar Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        768,
+        400
+      ],
+      "webhookId": "f283e384-8c7f-4d9c-bdd9-3e2768c8ec4d",
+      "credentials": {
+        "telegramApi": {
+          "id": "BldOfu8GmlV4ifRu",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://brazilsouth.tts.speech.microsoft.com/cognitiveservices/v1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "{{SUA_SUBSCRIPTION_KEY_AZURE}}"
+            },
+            {
+              "name": "X-Microsoft-OutputFormat",
+              "value": "audio-16khz-128kbitrate-mono-mp3"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/ssml+xml",
+        "body": "=<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xmlns:mstts=\"http://www.w3.org/2001/mstts\" xml:lang=\"pt-BR\">\n  <voice name=\"pt-BR-FranciscaNeural\">\n    <mstts:express-as style=\"cheerful\">\n      <mstts:silence type=\"Sentenceboundary\" value=\"50ms\"/>\n      <prosody rate=\"+20%\">\n          {{ $json.roteiro }}\n      </prosody>\n    </mstts:express-as>\n  </voice>\n</speak>",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "b23e0de2-1a95-4568-ab2c-bc92bcc3e914",
+      "name": "Azure TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        592,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "name": "=audio_{{ $now.format('HH-mm') }}.mp3",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root"
+        },
+        "options": {}
+      },
+      "id": "ad3d5011-0959-4f1b-b4ce-b00b3f67fe14",
+      "name": "Upload Áudio",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        896,
+        208
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "RZcD7ehO2DGr0sZl",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        128,
+        -32
+      ],
+      "id": "408ce37a-72b4-486e-90a1-f364d6f80230",
+      "name": "Schedule Trigger"
+    }
+  ],
+  "pinData": {}
+}
